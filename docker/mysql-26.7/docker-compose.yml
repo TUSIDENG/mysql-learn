@@ -1,0 +1,18 @@
+# MySQL 26.7 Innovation —— 首个日历版本号(YY.M)创新版本，特性最新
+services:
+  mysql267:
+    image: mysql:26.7
+    container_name: mysql-learn-267
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      TZ: Asia/Shanghai
+    ports:
+      - "33267:3306"
+    volumes:
+      - ./data:/var/lib/mysql
+      - ./conf/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci

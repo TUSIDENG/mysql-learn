@@ -1,0 +1,20 @@
+# MySQL 5.7 —— 已于 2023-10 EOL，但存量实例仍很多，用于兼容旧系统演练
+services:
+  mysql57:
+    image: mysql:5.7
+    container_name: mysql-learn-57
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      TZ: Asia/Shanghai
+    ports:
+      - "3357:3306"
+    volumes:
+      - ./data:/var/lib/mysql
+      - ./conf/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    command:
+      - --character-set-server=utf8mb4
+      # 5.7 没有 0900 排序规则，使用 unicode_ci
+      - --collation-server=utf8mb4_unicode_ci
+      # 5.7 默认认证插件即 mysql_native_password，无需额外配置
