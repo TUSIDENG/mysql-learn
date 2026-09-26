@@ -55,6 +55,31 @@ docker compose down; Remove-Item -Recurse -Force data
 
 四个版本端口互不冲突，可以同时启动进行特性对比。`initdb/` 中的脚本仅在数据目录首次初始化时自动执行。
 
+### 执行章节1脚本
+
+脚本位于 [practice/01-basic](file:///d:/code/mysql-learn/practice/01-basic)，按编号顺序执行（先跑 `00-sample-schema.sql` 建示例库）：
+
+```powershell
+# Windows PowerShell：先设置 UTF-8，避免中文注释被按 ASCII 编码传给 mysql
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
+Get-ChildItem practice\01-basic\*.sql | Sort-Object Name | ForEach-Object {
+    Write-Host "===== $($_.Name) ====="
+    Get-Content $_.FullName -Raw -Encoding UTF8 |
+        docker exec -i mysql-learn-84 mysql -uroot -proot123 --default-character-set=utf8mb4
+}
+```
+
+也可进入容器后用 `source` 执行（需先把脚本拷入容器）：
+
+```bash
+docker cp practice/01-basic mysql-learn-84:/sql
+docker exec -it mysql-learn-84 mysql -uroot -proot123 \
+    -e "SOURCE /sql/00-sample-schema.sql"
+```
+
+> 兼容性说明：脚本通用 5.7 ~ 26.x；标注 `[8.0+]` 的窗口函数、CTE、角色等语法在 5.7 上需跳过。
+
 ## 项目结构
 
 ```
@@ -69,7 +94,14 @@ mysql-learn/
 │   ├── mysql-9.7/                 # MySQL 9.7 LTS（结构同上）
 │   └── mysql-26.7/                # MySQL 26.7 Innovation（结构同上）
 ├── practice/                      # 学习练习
-│   ├── 01-basic/                  # 基础语法：DDL/DML/DQL/DCL、函数、事务
+│   ├── 01-basic/                  # 基础语法
+│   │   ├── 00-sample-schema.sql   # 示例库表（先执行）
+│   │   ├── 01-ddl.sql             # DDL：库/表/约束/索引
+│   │   ├── 02-dml.sql             # DML：增删改
+│   │   ├── 03-dql.sql             # DQL：查询/连接/子查询/窗口函数
+│   │   ├── 04-functions.sql       # 内置函数
+│   │   ├── 05-transaction.sql     # 事务/隔离级别/锁
+│   │   └── 06-dcl.sql             # 用户与权限
 │   ├── 02-design/                 # 数据库设计：范式、建模、索引设计
 │   ├── 03-optimization/           # 性能优化：EXPLAIN、慢查询、参数调优
 │   └── 04-version-drills/         # 5.7/8.4/9.7/26.7 版本差异与新特性演练
@@ -81,3 +113,7 @@ mysql-learn/
 
 - Docker Engine 20.10+ / Docker Desktop
 - Docker Compose v2（`docker compose` 命令）
+
+## 参考资料
+
+- [小林 coding - 图解 MySQL](https://xiaolincoding.com/mysql/)：图文并茂讲解 MySQL 索引、事务、锁、日志与高可用等核心知识
