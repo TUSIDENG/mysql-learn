@@ -80,6 +80,72 @@ docker exec -it mysql-learn-84 mysql -uroot -proot123 \
 
 > 兼容性说明：脚本通用 5.7 ~ 26.x；标注 `[8.0+]` 的窗口函数、CTE、角色等语法在 5.7 上需跳过。
 
+### PowerShell 经 Docker 操作中文乱码（`?` / `??`）
+
+**现象**：`SELECT` 出的中文显示成 `?`，或 `INSERT` 中文后再查变成 `?`（本仓库预览里 `owner` 列的 `??` 就是这个问题）。
+
+**根本原因（两层，缺一不可）**：
+
+1. **容器内 mysql 客户端默认字符集是 `latin1`**（实测 `@@character_set_client/connection/results` 均为 `latin1`）。latin1 无法表示中文，服务端返回的 UTF-8 中文在客户端侧被替换成 `?`；这是 `SELECT` 出现 `?` 的直接原因。
+2. **PowerShell 发给原生程序（docker）的字节编码**默认可能不是 UTF-8：Windows PowerShell 5.1 走系统 ANSI 代码页（中文系统为 GBK）。`INSERT` 时若字节编码与客户端声明的字符集不一致，写入的就是错数据。
+
+> 关键认知：`--default-character-set=utf8mb4` 解决第 1 层（客户端与服务端的约定）；PowerShell 编码设置解决第 2 层（本机送出的字节）。**两层都对齐才不乱码。**
+
+#### 第 1 步：连接时始终带 `--default-character-set=utf8mb4`
+
+```powershell
+# SELECT：不带该参数是 latin1 → 中文变 ?；带上即正常
+docker exec mysql-learn-84 mysql -uroot -proot123 --default-character-set=utf8mb4 `
+    -e "SELECT acct_id, owner FROM mysql_learn.account"
+```
+
+#### 第 2 步：把 PowerShell 的输出编码设为 UTF-8 再传中文
+
+```powershell
+# Windows PowerShell 5.1 必须；PowerShell 7+ 默认即 UTF-8，可跳过
+$OutputEncoding = [System.Text.Encoding]::UTF8   # 控制管道给 docker 的字节编码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 控制回显，防止结果再被转码
+```
+
+#### 场景 A：管道执行 SQL 字符串（INSERT 中文）
+
+```powershell
+$OutputEncoding = [System.Text.Encoding]::UTF8
+"USE mysql_learn; INSERT INTO account VALUES (3,'张三',100);" |
+    docker exec -i mysql-learn-84 mysql -uroot -proot123 --default-character-set=utf8mb4
+```
+
+#### 场景 B：管道执行 `.sql` 文件（最常用，注意文件须存为 UTF-8）
+
+```powershell
+$OutputEncoding = [System.Text.Encoding]::UTF8
+Get-Content practice\01-basic\05-transaction.sql -Raw -Encoding UTF8 |
+    docker exec -i mysql-learn-84 mysql -uroot -proot123 --default-character-set=utf8mb4
+```
+
+> `-Encoding UTF8` 指定**读取**文件的解码方式（脚本均为 UTF-8 保存）；`$OutputEncoding` 指定**送出**给 docker 的字节编码。两者不是一回事，都要对。
+> Windows PowerShell 5.1 的 `Out-File -Encoding UTF8` 会写 **UTF-8 BOM**，自建文件时建议用无 BOM UTF-8（或直接用现有脚本），避免 BOM 被当成 SQL 字符报语法错。
+
+#### 场景 C：`docker exec -it` 交互式会话
+
+```powershell
+docker exec -it mysql-learn-84 mysql -uroot -proot123 --default-character-set=utf8mb4
+```
+
+进去后可确认三个字符集变量均为 `utf8mb4`：
+
+```sql
+SHOW VARIABLES LIKE 'character_set%';
+-- 期望 client / connection / results 都是 utf8mb4
+```
+
+#### 一劳永逸（可选）
+
+- **用 PowerShell 7（`pwsh`）替代 5.1**：默认 `$OutputEncoding` 与控制台编码均为 UTF-8，只需连接时带 `--default-character-set=utf8mb4`。
+- **在容器配置里固化默认字符集**：在 `docker/mysql-8.4/conf/my.cnf` 的 `[client]` 段加 `default-character-set=utf8mb4`（仅影响客户端默认值；服务端字符集在 `[mysqld]` 用 `character-set-server=utf8mb4`），改后需重建容器。
+
+> 排查口诀：存进去用 `HEX(列)` 看字节对不对（区分是"存错了"还是"显示错了"）；中文 UTF-8 每个汉字 3 字节，如"张三"=`E5BCA0 E4B889`。若 HEX 已错，是写入层（第 2 步）问题；HEX 对但显示 `?`，是客户端字符集（第 1 步）问题。
+
 ## 项目结构
 
 ```
@@ -100,7 +166,10 @@ mysql-learn/
 │   │   ├── 02-dml.sql             # DML：增删改
 │   │   ├── 03-dql.sql             # DQL：查询/连接/子查询/窗口函数
 │   │   ├── 04-functions.sql       # 内置函数
-│   │   ├── 05-transaction.sql     # 事务/隔离级别/锁
+│   │   ├── 05-transaction.sql     # 事务/隔离级别/锁（单会话可执行）
+│   │   ├── 05-transaction.md      # 配套详解：死锁、锁超时的产生/影响/避免
+│   │   ├── 05a-demo-session-a.sql # 双会话并发演示·会话A（与05b同时跑）
+│   │   ├── 05b-demo-session-b.sql # 双会话并发演示·会话B（自动复现1205/1213）
 │   │   └── 06-dcl.sql             # 用户与权限
 │   ├── 02-design/                 # 数据库设计：范式、建模、索引设计
 │   ├── 03-optimization/           # 性能优化：EXPLAIN、慢查询、参数调优
